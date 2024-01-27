@@ -18,6 +18,16 @@
 - model_strength: モデルへの適用率。省略した場合は `1.0` になります。
 - clip_strength: CLIPへの適用率。省略した場合は `model_strength` と同じになります。
 
+#### LoRA Block Weight
+
+[ComfyUI-Inspire-Pack](https://github.com/ltdrdata/ComfyUI-Inspire-Pack) をインストールしている場合、以下のように書くことで LoRA Block Weight を使用することが出来ます。
+
+```
+<lora:lora-filename[:model_strength[:clip_strength]][:lbw=lbw_preset]>
+```
+
+- lbw_preset: `SDXL-ALL` などのプリセット名か `1,0,0,0,0,0,1,1,1,1,1,1` など直接ウェイト表記
+  - ComfyUI-Inspire-Pack で使用できるプリセット名が使用できます
 
 ### HyperNetwork
 
