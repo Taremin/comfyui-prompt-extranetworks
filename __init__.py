@@ -68,6 +68,13 @@ class PromptExtraNetworks:
         "MODEL",
         "CLIP",
         "STRING",
+        "STRING",
+    )
+    RETURN_NAMES = (
+        "model",
+        "clip",
+        "replaced string",
+        "original string",
     )
     FUNCTION = "process"
     CATEGORY = "loaders"
@@ -80,7 +87,7 @@ class PromptExtraNetworks:
         if "hypernet" in extra_networks:
             (model,) = self.process_hypernetwork(model, extra_networks)
 
-        return (model, clip, replaced_prompt)
+        return (model, clip, replaced_prompt, prompt)
 
     def process_lora(self, model, clip, extra_networks):
         for params in extra_networks["lora"]:
