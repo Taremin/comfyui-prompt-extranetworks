@@ -21,7 +21,13 @@ def load_module(path: str):
 
 path = os.path.join(os.path.dirname(__file__), "data.py")
 data = load_module(path)
-load_custom_nodes = nodes.load_custom_nodes
+if hasattr(nodes, "load_custom_nodes"):
+    load_custom_nodes = nodes.load_custom_nodes
+elif hasattr(nodes, "init_external_custom_nodes"):
+    load_custom_nodes = nodes.init_external_custom_nodes
+else:
+    print("Unsupported ComfyUI version")
+    raise AttributeError
 
 
 def on_custom_nodes_loaded(function):
@@ -39,4 +45,10 @@ def hooked_load_custom_nodes(*args):
     return retval
 
 
-nodes.load_custom_nodes = hooked_load_custom_nodes
+if hasattr(nodes, "load_custom_nodes"):
+    nodes.load_custom_nodes = hooked_load_custom_nodes
+elif hasattr(nodes, "init_external_custom_nodes"):
+    nodes.init_external_custom_nodes = hooked_load_custom_nodes
+else:
+    print("Unsupported ComfyUI version")
+    raise AttributeError
