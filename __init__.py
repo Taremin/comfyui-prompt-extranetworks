@@ -1,3 +1,4 @@
+from typing import Callable, Dict, List, Literal, Self, TypeAlias
 import re
 from re import Match
 from nodes import LoraLoader
@@ -9,6 +10,68 @@ extra_networks_pattern = re.compile(r"<(\w+):([^>]+)>")
 LoraLoaderBlockWeight = None
 
 NAME = "ComfyUI Prompt Extranetworks"
+
+
+CacheTypes = Literal["always", "once", "none"]
+
+DEBUG = False
+# DEBUG = True
+
+
+def debug_print(*args):
+    if DEBUG:
+        print(f"[{NAME}]", *args)
+
+
+class CacheData:
+    def __init__(self, name: str, type: CacheTypes, data: any):
+        self.name = name
+        self.type = type
+        self.data = data
+
+
+class Cache:
+    def __init__(self):
+        self.cache: Dict[str, CacheData] = {}
+
+    def append(self, data: CacheData):
+        self.cache[data.name] = data
+
+    def get(self, key: str):
+        return self.cache.get(key)
+
+    def filter(self, func: Callable[[str, CacheTypes], bool]):
+        for key, value in list(self.cache.items()):
+            if not func(value.name, value.type):
+                debug_print("drop by filter:", key)
+                self.remove(key)
+        return
+
+    def remove(self, key: str):
+        del self.cache[key]
+
+    def next(self, next: Self) -> Self:
+        new_cache = Cache()
+
+        for value in self.cache.values():
+            if value.type in ("always"):
+                new_cache.append(value)
+        for value in next.cache.values():
+            if value.type in ("always", "once"):
+                new_cache.append(value)
+            elif value.type in ("none"):
+                if new_cache.get(value.name) is not None:
+                    new_cache.remove(value.name)
+
+        return new_cache
+
+    def __str__(self):
+        result_list: List[str] = []
+        result_list.append("Cache(")
+        for key, value in self.cache.items():
+            result_list.append(f'\t(name="{key}", type="{value.type}"),')
+        result_list.append(")")
+        return "\n".join(result_list)
 
 
 def on_load(mappings: dict):
@@ -47,9 +110,12 @@ class ExtraNetworksParam:
                 return value
 
 
+ExtraNetworks: TypeAlias = Dict[str, List[ExtraNetworksParam]]
+
+
 class PromptExtraNetworks:
     def __init__(self):
-        pass
+        self.cache: Dict[str, Cache] = {}  # Cache()
 
     @classmethod
     def INPUT_TYPES(s):
@@ -89,7 +155,18 @@ class PromptExtraNetworks:
 
         return (model, clip, replaced_prompt, prompt)
 
-    def process_lora(self, model, clip, extra_networks):
+    def process_lora(self, model, clip, extra_networks: ExtraNetworks):
+        cache = self.cache.get("lora")
+        if cache is None:
+            cache = self.cache["lora"] = Cache()
+        cache_next = Cache()
+
+        # キャッシュ容量の増加を避けるため事前に今回使用しないものを削除
+        lora_list = dict.fromkeys(
+            [params.positional[0] for params in extra_networks["lora"]], True
+        )
+        cache.filter(lambda name, type: type == "always" or lora_list.get(name, False))
+
         for params in extra_networks["lora"]:
             lora_name = params.positional[0]
 
@@ -104,6 +181,11 @@ class PromptExtraNetworks:
 
             if LoraLoaderBlockWeight is not None and "lbw" in params.named:
                 loader = LoraLoaderBlockWeight()
+                lora_cache = cache.get(lora_name)
+                if lora_cache is not None:
+                    debug_print("cache hit:", lora_name)
+                    loader.loaded_lora = lora_cache.data
+
                 func_name = (
                     LoraLoaderBlockWeight.FUNCTION
                     if hasattr(LoraLoaderBlockWeight, "FUNCTION")
@@ -150,6 +232,11 @@ class PromptExtraNetworks:
                     print(f"\tFile: {lora_name}")
             else:
                 loader = LoraLoader()
+                lora_cache = cache.get(lora_name)
+                if lora_cache is not None:
+                    debug_print("cache hit:", lora_name)
+                    loader.loaded_lora = lora_cache.data
+
                 func_name = (
                     LoraLoader.FUNCTION
                     if hasattr(LoraLoader, "FUNCTION")
@@ -172,45 +259,19 @@ class PromptExtraNetworks:
                     print("LoraLoader Error:", e)
                     print(f"\tFile: {lora_name}")
 
-        return (model, clip)
+            cache_param = params.named.get("cache")
+            if cache_param in ("always", "once", "none"):
+                cache_next.append(CacheData(lora_name, cache_param, loader.loaded_lora))
+            else:
+                cache_next.append(CacheData(lora_name, "none", loader.loaded_lora))
 
-    def process_lora_block_weight(self, model, clip, extra_networks):
-        for params in extra_networks["lora"]:
-            loader = LoraLoader()
-            func_name = (
-                LoraLoader.FUNCTION if hasattr(LoraLoader, "FUNCTION") else "execute"
-            )
-            func = getattr(loader, func_name, None)
-
-            if func is None or not callable(func):
-                continue
-
-            lora_name = params.positional[0]
-
-            if len(params.positional) == 1:
-                strength_model = 1.0
-                strength_clip = 1.0
-            elif len(params.positional) == 2:
-                strength_model = strength_clip = params.positional[1]
-            elif len(params.positional) >= 3:
-                strength_model = params.positional[1]
-                strength_clip = params.positional[2]
-
-            try:
-                model, clip = func(
-                    model=model,
-                    clip=clip,
-                    lora_name=lora_name,
-                    strength_model=strength_model,
-                    strength_clip=strength_clip,
-                )
-            except Exception as e:
-                print("LoraLoader Error:", e)
-                print(f"\tFile: {lora_name}")
+        debug_print("cache before process:", str(cache))
+        self.cache["lora"] = cache.next(cache_next)
+        debug_print("cache after process:", str(self.cache["lora"]))
 
         return (model, clip)
 
-    def process_hypernetwork(self, model, extra_networks):
+    def process_hypernetwork(self, model, extra_networks: ExtraNetworks):
         for params in extra_networks["hypernet"]:
             loader = HypernetworkLoader()
             func_name = (
@@ -243,7 +304,7 @@ class PromptExtraNetworks:
         return (model,)
 
     def parse(self, prompt: str):
-        extra_networks = {}
+        extra_networks: ExtraNetworks = {}
 
         def on_match(match: Match):
             groups = match.groups()
