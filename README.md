@@ -53,6 +53,10 @@
 
 **この機能はテストされていません。**
 
+## その他
+
+[WebUI Monaco Prompt](https://github.com/Taremin/webui-monaco-prompt) のスニペットに対応しています。
+
 ## ライセンス
 
 [MIT](./LICENSE)

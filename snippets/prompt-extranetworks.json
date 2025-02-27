@@ -1,0 +1,17 @@
+[
+    {
+        "label": "lora",
+        "insertText": "<lora:${1}:${2:1.0}:${3:1.0}>",
+        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength"
+    },
+    {
+        "label": "lbw",
+        "insertText": "<lora:${1}:${2:1.0}:${3:1.0}:lbw=>",
+        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength"
+    },
+    {
+        "label": "hypernet",
+        "insertText": "<hypernet:${1}:${2:1.0}>",
+        "documentation": "*$1*: Model Name<br>*$2*: Strength"
+    }
+]
