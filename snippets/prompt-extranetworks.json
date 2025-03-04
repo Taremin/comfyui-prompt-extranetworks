@@ -13,5 +13,10 @@
         "label": "hypernet",
         "insertText": "<hypernet:${1}:${2:1.0}>",
         "documentation": "*$1*: Model Name<br>*$2*: Strength"
+    },
+    {
+        "label": "controlnet",
+        "insertText": "<controlnet:${1}:${2:image}:${3:1.0}:${4:0.0}:${5:1.0}:cache=${6|once,always,none|}>",
+        "documentation": "*$1*: Model Name<br>*$2*: ControlNet Image<br>*$3*: ControlNet Strength<br>*$4*:start percent<br>*$5*:end percent<br>*$6*: model cache"
     }
 ]
