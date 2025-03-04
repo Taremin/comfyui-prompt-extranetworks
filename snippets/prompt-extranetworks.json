@@ -2,12 +2,12 @@
     {
         "label": "lora",
         "insertText": "<lora:${1}:${2:1.0}:${3:1.0}:cache=${4|once,always,none|}>",
-        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength"
+        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength<br>*$4*: Model Cache"
     },
     {
         "label": "lbw",
-        "insertText": "<lora:${1}:${2:1.0}:${3:1.0}:cache=${4|once,always,none|}:lbw=>",
-        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength"
+        "insertText": "<lora:${1}:${2:1.0}:${3:1.0}:cache=${4|once,always,none|}:lbw=${5}>",
+        "documentation": "*$1*: Model Name<br>*$2*: Model Strength<br>*$3*: CLIP Strength<br>*$4*: Model Cache<br>*$5*: LoRA Block Weight Preset or Parameters"
     },
     {
         "label": "hypernet",
