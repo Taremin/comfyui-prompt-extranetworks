@@ -1,11 +1,12 @@
 from typing import Callable, Dict, List, Literal, Self, TypeAlias
-import re
-from re import Match
-from nodes import LoraLoader
+from nodes import LoraLoader, ControlNetLoader, ControlNetApplyAdvanced
 from comfy_extras.nodes_hypernetwork import HypernetworkLoader
 from .prestartup_script import on_custom_nodes_loaded
+from .extranetwork_param import ExtraNetworksParam
+import os
+from .image import load_image
 
-extra_networks_pattern = re.compile(r"<(\w+):([^>]+)>")
+extension_root_path = os.path.dirname(__file__)
 
 LoraLoaderBlockWeight = None
 
@@ -88,28 +89,6 @@ def on_load(mappings: dict):
 on_custom_nodes_loaded(on_load)
 
 
-class ExtraNetworksParam:
-    def __init__(self, items=[]):
-        self.positional = []
-        self.named = {}
-
-        for item in items:
-            parts = item.split("=", 2)
-            if len(parts) == 2:
-                self.named[parts[0]] = self.process_args(parts[1])
-            else:
-                self.positional.append(self.process_args(item))
-
-    def process_args(self, value: str):
-        try:
-            return int(value)
-        except ValueError:
-            try:
-                return float(value)
-            except ValueError:
-                return value
-
-
 ExtraNetworks: TypeAlias = Dict[str, List[ExtraNetworksParam]]
 
 
@@ -146,7 +125,9 @@ class PromptExtraNetworks:
     CATEGORY = "loaders"
 
     def process(self, model, clip, prompt):
-        replaced_prompt, extra_networks = self.parse(prompt=prompt)
+        replaced_prompt, extra_networks = ExtraNetworksParam.parse(
+            prompt=prompt, target=["lora", "hypernet"]
+        )
 
         if "lora" in extra_networks:
             model, clip = self.process_lora(model, clip, extra_networks)
@@ -303,21 +284,232 @@ class PromptExtraNetworks:
 
         return (model,)
 
-    def parse(self, prompt: str):
-        extra_networks: ExtraNetworks = {}
 
-        def on_match(match: Match):
-            groups = match.groups()
-            if groups[0] not in extra_networks:
-                extra_networks[groups[0]] = []
-            extra_networks[groups[0]].append(
-                ExtraNetworksParam(items=groups[1].split(":"))
+class PromptControlNetPrepare:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "prompt": (
+                    "STRING",
+                    {"multiline": True, "forceInput": True},
+                ),
+            }
+        }
+
+    RETURN_TYPES = (
+        "PROMPT_CONTROLNET_CONFIG",
+        "STRING",
+    )
+    RETURN_NAMES = (
+        "prompt_controlnet_config",
+        "replaced_string",
+    )
+    FUNCTION = "process"
+    CATEGORY = "conditioning/controlnet"
+
+    def process(self, prompt):
+        replaced_prompt, extra_networks = ExtraNetworksParam.parse(
+            prompt=prompt, target=["controlnet"]
+        )
+
+        config = []
+
+        if "controlnet" in extra_networks:
+            config = self.process_controlnet(extra_networks)
+
+        return (
+            config,
+            replaced_prompt,
+            prompt,
+        )
+
+    def process_controlnet(self, extra_networks: ExtraNetworks):
+        configs = []
+        for params in extra_networks["controlnet"]:
+            model_name = params.positional[0]
+            if len(params.positional) < 2:
+                print(f"[{NAME}] controlnet:", "image name not found")
+                continue
+            else:
+                image_name = params.positional[1]
+
+            strength = (
+                1.0 if len(params.positional) < 3 else float(params.positional[2])
             )
-            return ""
+            start_percent = (
+                0.0 if len(params.positional) < 4 else float(params.positional[3])
+            )
+            end_percent = (
+                1.0 if len(params.positional) < 5 else float(params.positional[4])
+            )
 
-        replaced = extra_networks_pattern.sub(repl=on_match, string=prompt)
-        return (replaced, extra_networks)
+            image_path = os.path.join(
+                extension_root_path, "controlnet_images", image_name
+            )
+            if not os.path.isfile(image_path):
+                print(f"[{NAME}] controlnet:", f"image not found - {image_path}")
+                continue
+
+            configs.append(
+                {
+                    "model": model_name,
+                    "image": image_path,
+                    "strength": strength,
+                    "start_percent": start_percent,
+                    "end_percent": end_percent,
+                    "cache": params.named.get("cache", "none"),
+                }
+            )
+
+        return configs
 
 
-NODE_CLASS_MAPPINGS = {"PromptExtraNetworks": PromptExtraNetworks}
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptExtraNetworks": "PromptExtraNetworks"}
+class PromptControlNetApply:
+    def __init__(self):
+        self.cache: Dict[str, Cache] = {}
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "prompt_controlnet_config": ("PROMPT_CONTROLNET_CONFIG",),
+                "positive": ("CONDITIONING",),
+                "negative": ("CONDITIONING",),
+            },
+            "optional": {"vae": ("VAE",)},
+        }
+
+    RETURN_TYPES = (
+        "CONDITIONING",
+        "CONDITIONING",
+    )
+    RETURN_NAMES = (
+        "positive",
+        "negative",
+    )
+    FUNCTION = "process"
+    CATEGORY = "conditioning/controlnet"
+
+    def validate_config(self, prompt_controlnet_config):
+        if not isinstance(prompt_controlnet_config, list):
+            return f"Wrong input: {type(prompt_controlnet_config)}"
+
+        for config in prompt_controlnet_config:
+            if not isinstance(config, dict):
+                return f"Wrong input: {type(config)}"
+
+            for key in (
+                "model",
+                "image",
+                "strength",
+                "start_percent",
+                "end_percent",
+                "cache",
+            ):
+                if config.get(key) is None:
+                    return f"Wrong input: '{key}' not found in {config}"
+
+        return True
+
+    def process(self, prompt_controlnet_config, positive, negative, *args, **kwargs):
+        vae = kwargs.get("vae")
+
+        validation_result = self.validate_config(prompt_controlnet_config)
+        if validation_result is not True:
+            raise ValueError(f"[{NAME}]: {validation_result}")
+
+        cache_key = "controlnet"
+        cache = self.cache.get(cache_key)
+        if cache is None:
+            cache = self.cache[cache_key] = Cache()
+        cache_next = Cache()
+
+        # キャッシュ容量の増加を避けるため事前に今回使用しないものを削除
+        model_list = dict.fromkeys([c["model"] for c in prompt_controlnet_config], True)
+        cache.filter(lambda name, type: type == "always" or model_list.get(name, False))
+
+        for c in prompt_controlnet_config:
+            model_name = c["model"]
+            model_cache = cache.get(model_name)
+            if model_cache is not None:
+                debug_print("cache hit:", model_name)
+                controlnet = model_cache.data
+            else:
+                loader = ControlNetLoader()
+                func_name = (
+                    ControlNetLoader.FUNCTION
+                    if hasattr(ControlNetLoader, "FUNCTION")
+                    else "execute"
+                )
+                func = getattr(loader, func_name, None)
+
+                if func is None or not callable(func):
+                    continue
+
+                try:
+                    (controlnet,) = func(
+                        control_net_name=model_name,
+                    )
+                except Exception as e:
+                    print("ControlNetLoader Error:", e)
+                    print(f"\tFile: {model_name}")
+                    continue
+
+                cache_param = c["cache"]
+                if cache_param in ("always", "once", "none"):
+                    cache_next.append(CacheData(model_name, cache_param, controlnet))
+                else:
+                    cache_next.append(CacheData(model_name, "none", controlnet))
+
+            image_path = os.path.join(
+                extension_root_path, "controlnet_images", os.path.basename(c["image"])
+            )
+            image, path = load_image(image_path)
+
+            applier = ControlNetApplyAdvanced()
+            func_name = (
+                ControlNetApplyAdvanced.FUNCTION
+                if hasattr(ControlNetApplyAdvanced, "FUNCTION")
+                else "execute"
+            )
+            func = getattr(applier, func_name, None)
+
+            if func is None or not callable(func):
+                continue
+
+            try:
+                positive, negative = func(
+                    positive,
+                    negative,
+                    controlnet,
+                    image,
+                    c["strength"],
+                    c["start_percent"],
+                    c["end_percent"],
+                    vae,
+                )
+            except Exception as e:
+                print("ControlNetLoader Error:", e)
+                print(f"\tFile: {model_name}")
+
+        debug_print("cache before process:", str(cache))
+        self.cache[cache_key] = cache.next(cache_next)
+        debug_print("cache after process:", str(self.cache[cache_key]))
+
+        return (positive, negative)
+
+
+NODE_CLASS_MAPPINGS = {
+    "PromptExtraNetworks": PromptExtraNetworks,
+    "PromptControlNetPrepare": PromptControlNetPrepare,
+    "PromptControlNetApply": PromptControlNetApply,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "PromptExtraNetworks": "PromptExtraNetworks",
+    "PromptControlNetPrepare": "PromptControlNetPrepare (Experimental)",
+    "PromptControlNetApply": "PromptControlNetApply (Experimental)",
+}
