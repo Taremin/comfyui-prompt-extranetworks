@@ -40,6 +40,19 @@
 キャッシュを使用するにしても `always` は大体の場合不要で、`once` で十分なことが多いはずです。
 (`once` を指定しても毎回読み込まれる LoRA は毎回更新されてキャッシュされ続けることになるため)
 
+### ControlNet / T2I-Adapter (Experimental)
+
+以下の文法をプロンプトに含めることで ControlNet / T2I-Adapter を読み込みます。
+
+```
+<controlnet:controlnet-model:controlnet-image[:strength[:start percent[:end percent]]][:cache={always|once|none}]>
+```
+
+- controlnet-image: このカスタムノードの `controlnet_images` にある画像のファイル名
+
+LoRA / HyperNetwork と違い `CLIPTextEncode` のあとの `CONDITIONING` で作用するため、１つのノードでプロンプト処理と適用を行うことが出来ません。
+そのため、`CLIPTextEncode` の前に `PromptControlNetPrepare` ノードでプロンプトの処理を行い、その後に `PromptControlNetApply` ノードで適用を行います。
+
 ### HyperNetwork
 
 以下の文法をプロンプトに含めることでHyperNetworkを読み込みます。
