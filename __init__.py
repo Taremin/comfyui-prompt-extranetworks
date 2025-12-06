@@ -189,10 +189,12 @@ class PromptExtraNetworks:
                         key, value = block_vector.split(sep=":", maxsplit=2)
                         presets[key] = value
                 if preset in presets:
-                    print(f"[{NAME}] preset: {preset}={presets[preset]}")
+                    print(
+                        f"[{NAME}] preset: {preset}={presets[preset]} lora_name:{lora_name}"
+                    )
                     preset = presets[preset]
                 else:
-                    print(f"[{NAME}] block weight:", preset)
+                    print(f"[{NAME}] block weight: {preset} lora_name:{lora_name}")
 
                 try:
                     model, clip, populated_vector = func(
